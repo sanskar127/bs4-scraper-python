@@ -1,57 +1,71 @@
 import time
-import json
+import requests
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
+import json
 
-def scrape_pcsx2_compatibility(url):
-    # Initialize ChromeDriver (change the executable_path to where your chromedriver is located)
-    driver = webdriver.Chrome(executable_path='chromedriver/chromedriver.exe')
+# Function to scrape table data
+def scrape_table(url):
+    # Use requests to fetch initial page content
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, 'html.parser')
 
-    try:
-        driver.get(url)
-        time.sleep(5)  # Let the page load completely (adjust as necessary)
+    # Find the total number of pages (if available)
+    # This depends on how pagination is implemented on the website
+    total_pages = 10  # Example: set the total number of pages
 
-        # Find the table element
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, '#compat_list_wrapper table')))
-        
-        # Get the page source
-        page_source = driver.page_source
-        
-    finally:
-        driver.quit()
-
-    # Parse the HTML with BeautifulSoup
-    soup = BeautifulSoup(page_source, 'html.parser')
-
-    # Extract table data
-    table = soup.find('table', {'id': 'compat_list'})
-    if not table:
-        raise Exception("Table not found on the page")
-
-    headers = [header.text.strip() for header in table.find_all('th')]
     table_data = []
+    headers = []
 
-    for row in table.find_all('tr'):
-        row_data = [cell.text.strip() for cell in row.find_all('td')]
-        if row_data:
-            table_data.append(row_data)
+    # Loop through each page
+    for page in range(1, total_pages + 1):
+        if page > 1:
+            # Use Selenium for dynamic content on subsequent pages
+            driver = webdriver.Chrome()  # Change to your WebDriver and its path
+            driver.get(url)
+            try:
+                # Wait for the pagination link to be clickable
+                element = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.LINK_TEXT, str(page)))
+                )
+                element.click()
+                time.sleep(3)  # Adjust the sleep time as needed to ensure page loads fully
+                soup = BeautifulSoup(driver.page_source, 'html.parser')
+            finally:
+                driver.quit()
+
+        # Extract table data from the current page
+        table = soup.find('table')
+        if table:
+            for row_idx, row in enumerate(table.find_all('tr')):
+                row_data = []
+                for col_idx, cell in enumerate(row.find_all(['th', 'td'])):
+                    if row_idx == 0:
+                        headers.append(cell.text.strip())
+                    else:
+                        row_data.append(cell.text.strip())
+                if row_data:
+                    table_data.append(row_data)
 
     return headers, table_data
 
+# Function to save data to JSON file
+def save_to_json(headers, table_data, filename):
+    data = {
+        "headers": headers,
+        "table_data": table_data
+    }
+    with open(filename, 'w') as json_file:
+        json.dump(data, json_file, indent=4)
+
 # Example usage
-url = 'https://pcsx2.net/compat/'
-headers, table_data = scrape_pcsx2_compatibility(url)
+url = 'https://pcsx2.net/compat'  # Replace with your URL
+headers, table_data = scrape_table(url)
 
 # Save scraped data to JSON file
-json_filename = 'pcsx2_compatibility.json'
-data = {
-    "headers": headers,
-    "table_data": table_data
-}
-with open(json_filename, 'w', encoding='utf-8') as json_file:
-    json.dump(data, json_file, ensure_ascii=False, indent=4)
-
+json_filename = 'scraped_data.json'
+save_to_json(headers, table_data, json_filename)
 print(f"Scraped data saved to {json_filename}")
